@@ -1,13 +1,39 @@
 import { LitElement, html } from 'lit';
 import { PitchDetector } from 'pitchy';
 
-// Type definitions for note frequencies
-type NoteName = 
-  | 'G3' | 'G#3' | 'A3' | 'A#3' | 'B3'
-  | 'C4' | 'C#4' | 'D4' | 'D#4' | 'E4' | 'F4' | 'F#4' | 'G4' | 'G#4' | 'A4' | 'A#4' | 'B4'
-  | 'C5' | 'C#5' | 'D5' | 'D#5' | 'E5' | 'F5' | 'F#5' | 'G5' | 'G#5' | 'A5';
+// Note frequencies for violin strings and common notes (chromatic scale)
+const noteFrequencies = {
+  'G3': 196.00,
+  'G#3': 207.65,
+  'A3': 220.00,
+  'A#3': 233.08,
+  'B3': 246.94,
+  'C4': 261.63,
+  'C#4': 277.18,
+  'D4': 293.66,
+  'D#4': 311.13,
+  'E4': 329.63,
+  'F4': 349.23,
+  'F#4': 369.99,
+  'G4': 392.00,
+  'G#4': 415.30,
+  'A4': 440.00,
+  'A#4': 466.16,
+  'B4': 493.88,
+  'C5': 523.25,
+  'C#5': 554.37,
+  'D5': 587.33,
+  'D#5': 622.25,
+  'E5': 659.25,
+  'F5': 698.46,
+  'F#5': 739.99,
+  'G5': 783.99,
+  'G#5': 830.61,
+  'A5': 880.00
+} as const;
 
-type NoteFrequencies = Record<NoteName, number>;
+// Type definitions derived from the noteFrequencies
+type NoteName = keyof typeof noteFrequencies;
 
 export class ViolinCompanion extends LitElement {
   // Public reactive properties
@@ -34,45 +60,17 @@ export class ViolinCompanion extends LitElement {
   }
 
   // Private properties with explicit types
-  private audioContext: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private detector: PitchDetector<Float32Array> | null = null;
-  private animationId: number | null = null;
+  private audioContext: AudioContext | undefined = undefined;
+  private analyser: AnalyserNode | undefined = undefined;
+  private detector: PitchDetector<Float32Array> | undefined = undefined;
+  private animationId: number | undefined = undefined;
 
   constructor() {
     super();
   }
 
-  // Note frequencies for violin strings and common notes (chromatic scale)
-  private readonly noteFrequencies: NoteFrequencies = {
-    'G3': 196.00,
-    'G#3': 207.65,
-    'A3': 220.00,
-    'A#3': 233.08,
-    'B3': 246.94,
-    'C4': 261.63,
-    'C#4': 277.18,
-    'D4': 293.66,
-    'D#4': 311.13,
-    'E4': 329.63,
-    'F4': 349.23,
-    'F#4': 369.99,
-    'G4': 392.00,
-    'G#4': 415.30,
-    'A4': 440.00,
-    'A#4': 466.16,
-    'B4': 493.88,
-    'C5': 523.25,
-    'C#5': 554.37,
-    'D5': 587.33,
-    'D#5': 622.25,
-    'E5': 659.25,
-    'F5': 698.46,
-    'F#5': 739.99,
-    'G5': 783.99,
-    'G#5': 830.61,
-    'A5': 880.00
-  };
+  // Note frequencies reference
+  private readonly noteFrequencies = noteFrequencies;
 
   async startListening(): Promise<void> {
     try {
@@ -126,12 +124,12 @@ export class ViolinCompanion extends LitElement {
     
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
-      this.animationId = null;
+      this.animationId = undefined;
     }
     
     if (this.audioContext) {
       this.audioContext.close();
-      this.audioContext = null;
+      this.audioContext = undefined;
     }
     
     this.currentNote = '--';
@@ -168,7 +166,7 @@ export class ViolinCompanion extends LitElement {
   private getNotePosition(note: string): number {
     // Map notes to staff positions (0-100, where 0 is top)
     // Sharps are positioned slightly between their adjacent natural notes
-    const positions: Record<string, number> = {
+    const positions: Record<NoteName, number> = {
       // Octave 5
       'A5': 5, 'G#5': 8, 'G5': 10, 'F#5': 14, 'F5': 17, 
       'E5': 25, 'D#5': 29, 'D5': 33, 'C#5': 36, 'C5': 40,
@@ -179,7 +177,7 @@ export class ViolinCompanion extends LitElement {
       'C#4': 91, 'C4': 95, 'B3': 100, 'A#3': 102, 'A3': 105, 
       'G#3': 107, 'G3': 110
     };
-    return positions[note] || 50;
+    return positions[note as NoteName] || 50;
   }
 
   render() {
@@ -243,10 +241,10 @@ export class ViolinCompanion extends LitElement {
               </h2>
               
               <div class="flex flex-wrap justify-center gap-2 mb-8">
-                ${(Object.keys(this.noteFrequencies) as NoteName[]).map(note => html`
+                ${Object.keys(this.noteFrequencies).map(note => html`
                   <button 
                     class="btn btn-sm ${this.targetNote === note ? 'btn-primary' : 'btn-ghost'}"
-                    @click=${() => this.setTargetNote(note)}>
+                    @click=${() => this.setTargetNote(note as NoteName)}>
                     ${note}
                   </button>
                 `)}
