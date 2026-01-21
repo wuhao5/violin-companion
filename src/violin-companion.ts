@@ -147,7 +147,7 @@ export class ViolinCompanion extends LitElement {
     const octave = Math.floor(Math.round(semitone) / 12) - 1;
     const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
     const note = notes[noteIndex];
-    return note ? note + octave : '--';
+    return (noteIndex >= 0 && noteIndex < notes.length && note) ? note + octave : '--';
   }
 
   private checkTuning(frequency: number): void {
