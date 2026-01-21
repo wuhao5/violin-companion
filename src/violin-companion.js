@@ -12,6 +12,7 @@ export class ViolinCompanion extends LitElement {
   };
 
   // Disable shadow DOM to allow Tailwind classes to work
+  // Note: This removes style encapsulation and may cause CSS conflicts with parent elements
   createRenderRoot() {
     return this;
   }
