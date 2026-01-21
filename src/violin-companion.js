@@ -31,23 +31,34 @@ export class ViolinCompanion extends LitElement {
     this.animationId = null;
   }
 
-  // Note frequencies for violin strings and common notes
+  // Note frequencies for violin strings and common notes (chromatic scale)
   noteFrequencies = {
     'G3': 196.00,
+    'G#3': 207.65,
     'A3': 220.00,
+    'A#3': 233.08,
     'B3': 246.94,
     'C4': 261.63,
+    'C#4': 277.18,
     'D4': 293.66,
+    'D#4': 311.13,
     'E4': 329.63,
     'F4': 349.23,
+    'F#4': 369.99,
     'G4': 392.00,
+    'G#4': 415.30,
     'A4': 440.00,
+    'A#4': 466.16,
     'B4': 493.88,
     'C5': 523.25,
+    'C#5': 554.37,
     'D5': 587.33,
+    'D#5': 622.25,
     'E5': 659.25,
     'F5': 698.46,
+    'F#5': 739.99,
     'G5': 783.99,
+    'G#5': 830.61,
     'A5': 880.00
   };
 
@@ -139,10 +150,17 @@ export class ViolinCompanion extends LitElement {
 
   getNotePosition(note) {
     // Map notes to staff positions (0-100, where 0 is top)
+    // Sharps are positioned slightly between their adjacent natural notes
     const positions = {
-      'A5': 5, 'G5': 10, 'F5': 17, 'E5': 25, 'D5': 33, 'C5': 40,
-      'B4': 48, 'A4': 56, 'G4': 64, 'F4': 72, 'E4': 80,
-      'D4': 88, 'C4': 95, 'B3': 100, 'A3': 105, 'G3': 110
+      // Octave 5
+      'A5': 5, 'G#5': 8, 'G5': 10, 'F#5': 14, 'F5': 17, 
+      'E5': 25, 'D#5': 29, 'D5': 33, 'C#5': 36, 'C5': 40,
+      // Octave 4
+      'B4': 48, 'A#4': 52, 'A4': 56, 'G#4': 60, 'G4': 64, 
+      'F#4': 68, 'F4': 72, 'E4': 80, 'D#4': 84, 'D4': 88,
+      // Octave 3-4
+      'C#4': 91, 'C4': 95, 'B3': 100, 'A#3': 102, 'A3': 105, 
+      'G#3': 107, 'G3': 110
     };
     return positions[note] || 50;
   }
