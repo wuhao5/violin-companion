@@ -1,7 +1,23 @@
 import { LitElement, html } from 'lit';
 import { PitchDetector } from 'pitchy';
 
+// Type definitions for note frequencies
+type NoteName = 
+  | 'G3' | 'G#3' | 'A3' | 'A#3' | 'B3'
+  | 'C4' | 'C#4' | 'D4' | 'D#4' | 'E4' | 'F4' | 'F#4' | 'G4' | 'G#4' | 'A4' | 'A#4' | 'B4'
+  | 'C5' | 'C#5' | 'D5' | 'D#5' | 'E5' | 'F5' | 'F#5' | 'G5' | 'G#5' | 'A5';
+
+type NoteFrequencies = Record<NoteName, number>;
+
 export class ViolinCompanion extends LitElement {
+  // Public reactive properties
+  isListening: boolean = false;
+  currentNote: string = '--';
+  currentFrequency: number = 0;
+  clarity: number = 0;
+  targetNote: NoteName = 'A4';
+  inTune: boolean = false;
+
   static properties = {
     isListening: { type: Boolean },
     currentNote: { type: String },
@@ -17,22 +33,18 @@ export class ViolinCompanion extends LitElement {
     return this;
   }
 
+  // Private properties with explicit types
+  private audioContext: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private detector: PitchDetector<Float32Array> | null = null;
+  private animationId: number | null = null;
+
   constructor() {
     super();
-    this.isListening = false;
-    this.currentNote = '--';
-    this.currentFrequency = 0;
-    this.clarity = 0;
-    this.targetNote = 'A4';
-    this.inTune = false;
-    this.audioContext = null;
-    this.analyser = null;
-    this.detector = null;
-    this.animationId = null;
   }
 
   // Note frequencies for violin strings and common notes (chromatic scale)
-  noteFrequencies = {
+  private readonly noteFrequencies: NoteFrequencies = {
     'G3': 196.00,
     'G#3': 207.65,
     'A3': 220.00,
@@ -62,7 +74,7 @@ export class ViolinCompanion extends LitElement {
     'A5': 880.00
   };
 
-  async startListening() {
+  async startListening(): Promise<void> {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
@@ -81,7 +93,11 @@ export class ViolinCompanion extends LitElement {
       
       this.isListening = true;
       
-      const updatePitch = () => {
+      const updatePitch = (): void => {
+        if (!this.analyser || !this.detector || !this.audioContext) {
+          return;
+        }
+
         this.analyser.getFloatTimeDomainData(buffer);
         
         const [frequency, clarity] = this.detector.findPitch(buffer, this.audioContext.sampleRate);
@@ -105,7 +121,7 @@ export class ViolinCompanion extends LitElement {
     }
   }
 
-  stopListening() {
+  stopListening(): void {
     this.isListening = false;
     
     if (this.animationId) {
@@ -124,16 +140,17 @@ export class ViolinCompanion extends LitElement {
     this.inTune = false;
   }
 
-  frequencyToNote(frequency) {
+  private frequencyToNote(frequency: number): string {
     const A4 = 440;
     const semitone = 69 + 12 * Math.log2(frequency / A4);
     const noteIndex = ((Math.round(semitone) % 12) + 12) % 12;
     const octave = Math.floor(Math.round(semitone) / 12) - 1;
-    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    return notes[noteIndex] + octave;
+    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
+    const note = notes[noteIndex];
+    return note ? note + octave : '--';
   }
 
-  checkTuning(frequency) {
+  private checkTuning(frequency: number): void {
     const targetFreq = this.noteFrequencies[this.targetNote];
     if (targetFreq) {
       const cents = 1200 * Math.log2(frequency / targetFreq);
@@ -141,17 +158,17 @@ export class ViolinCompanion extends LitElement {
     }
   }
 
-  setTargetNote(note) {
+  setTargetNote(note: NoteName): void {
     this.targetNote = note;
     if (this.currentFrequency > 0) {
       this.checkTuning(this.currentFrequency);
     }
   }
 
-  getNotePosition(note) {
+  private getNotePosition(note: string): number {
     // Map notes to staff positions (0-100, where 0 is top)
     // Sharps are positioned slightly between their adjacent natural notes
-    const positions = {
+    const positions: Record<string, number> = {
       // Octave 5
       'A5': 5, 'G#5': 8, 'G5': 10, 'F#5': 14, 'F5': 17, 
       'E5': 25, 'D#5': 29, 'D5': 33, 'C#5': 36, 'C5': 40,
@@ -226,7 +243,7 @@ export class ViolinCompanion extends LitElement {
               </h2>
               
               <div class="flex flex-wrap justify-center gap-2 mb-8">
-                ${Object.keys(this.noteFrequencies).map(note => html`
+                ${(Object.keys(this.noteFrequencies) as NoteName[]).map(note => html`
                   <button 
                     class="btn btn-sm ${this.targetNote === note ? 'btn-primary' : 'btn-ghost'}"
                     @click=${() => this.setTargetNote(note)}>
