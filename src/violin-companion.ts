@@ -1,7 +1,49 @@
 import { LitElement, html } from 'lit';
 import { PitchDetector } from 'pitchy';
 
+// Note frequencies for violin strings and common notes (chromatic scale)
+const noteFrequencies = {
+  'G3': 196.00,
+  'G#3': 207.65,
+  'A3': 220.00,
+  'A#3': 233.08,
+  'B3': 246.94,
+  'C4': 261.63,
+  'C#4': 277.18,
+  'D4': 293.66,
+  'D#4': 311.13,
+  'E4': 329.63,
+  'F4': 349.23,
+  'F#4': 369.99,
+  'G4': 392.00,
+  'G#4': 415.30,
+  'A4': 440.00,
+  'A#4': 466.16,
+  'B4': 493.88,
+  'C5': 523.25,
+  'C#5': 554.37,
+  'D5': 587.33,
+  'D#5': 622.25,
+  'E5': 659.25,
+  'F5': 698.46,
+  'F#5': 739.99,
+  'G5': 783.99,
+  'G#5': 830.61,
+  'A5': 880.00
+} as const;
+
+// Type definitions derived from the noteFrequencies
+type NoteName = keyof typeof noteFrequencies;
+
 export class ViolinCompanion extends LitElement {
+  // Public reactive properties
+  isListening: boolean = false;
+  currentNote: string = '--';
+  currentFrequency: number = 0;
+  clarity: number = 0;
+  targetNote: NoteName = 'A4';
+  inTune: boolean = false;
+
   static properties = {
     isListening: { type: Boolean },
     currentNote: { type: String },
@@ -17,52 +59,20 @@ export class ViolinCompanion extends LitElement {
     return this;
   }
 
+  // Private properties with explicit types
+  private audioContext: AudioContext | undefined = undefined;
+  private analyser: AnalyserNode | undefined = undefined;
+  private detector: PitchDetector<Float32Array> | undefined = undefined;
+  private animationId: number | undefined = undefined;
+
   constructor() {
     super();
-    this.isListening = false;
-    this.currentNote = '--';
-    this.currentFrequency = 0;
-    this.clarity = 0;
-    this.targetNote = 'A4';
-    this.inTune = false;
-    this.audioContext = null;
-    this.analyser = null;
-    this.detector = null;
-    this.animationId = null;
   }
 
-  // Note frequencies for violin strings and common notes (chromatic scale)
-  noteFrequencies = {
-    'G3': 196.00,
-    'G#3': 207.65,
-    'A3': 220.00,
-    'A#3': 233.08,
-    'B3': 246.94,
-    'C4': 261.63,
-    'C#4': 277.18,
-    'D4': 293.66,
-    'D#4': 311.13,
-    'E4': 329.63,
-    'F4': 349.23,
-    'F#4': 369.99,
-    'G4': 392.00,
-    'G#4': 415.30,
-    'A4': 440.00,
-    'A#4': 466.16,
-    'B4': 493.88,
-    'C5': 523.25,
-    'C#5': 554.37,
-    'D5': 587.33,
-    'D#5': 622.25,
-    'E5': 659.25,
-    'F5': 698.46,
-    'F#5': 739.99,
-    'G5': 783.99,
-    'G#5': 830.61,
-    'A5': 880.00
-  };
+  // Note frequencies reference
+  private readonly noteFrequencies = noteFrequencies;
 
-  async startListening() {
+  async startListening(): Promise<void> {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
@@ -81,7 +91,11 @@ export class ViolinCompanion extends LitElement {
       
       this.isListening = true;
       
-      const updatePitch = () => {
+      const updatePitch = (): void => {
+        if (!this.analyser || !this.detector || !this.audioContext) {
+          return;
+        }
+
         this.analyser.getFloatTimeDomainData(buffer);
         
         const [frequency, clarity] = this.detector.findPitch(buffer, this.audioContext.sampleRate);
@@ -105,17 +119,17 @@ export class ViolinCompanion extends LitElement {
     }
   }
 
-  stopListening() {
+  stopListening(): void {
     this.isListening = false;
     
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
-      this.animationId = null;
+      this.animationId = undefined;
     }
     
     if (this.audioContext) {
       this.audioContext.close();
-      this.audioContext = null;
+      this.audioContext = undefined;
     }
     
     this.currentNote = '--';
@@ -124,16 +138,17 @@ export class ViolinCompanion extends LitElement {
     this.inTune = false;
   }
 
-  frequencyToNote(frequency) {
+  private frequencyToNote(frequency: number): string {
     const A4 = 440;
     const semitone = 69 + 12 * Math.log2(frequency / A4);
     const noteIndex = ((Math.round(semitone) % 12) + 12) % 12;
     const octave = Math.floor(Math.round(semitone) / 12) - 1;
-    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    return notes[noteIndex] + octave;
+    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
+    const note = notes[noteIndex];
+    return (noteIndex >= 0 && noteIndex < notes.length && note) ? note + octave : '--';
   }
 
-  checkTuning(frequency) {
+  private checkTuning(frequency: number): void {
     const targetFreq = this.noteFrequencies[this.targetNote];
     if (targetFreq) {
       const cents = 1200 * Math.log2(frequency / targetFreq);
@@ -141,17 +156,17 @@ export class ViolinCompanion extends LitElement {
     }
   }
 
-  setTargetNote(note) {
+  setTargetNote(note: NoteName): void {
     this.targetNote = note;
     if (this.currentFrequency > 0) {
       this.checkTuning(this.currentFrequency);
     }
   }
 
-  getNotePosition(note) {
+  private getNotePosition(note: string): number {
     // Map notes to staff positions (0-100, where 0 is top)
     // Sharps are positioned slightly between their adjacent natural notes
-    const positions = {
+    const positions: Record<NoteName, number> = {
       // Octave 5
       'A5': 5, 'G#5': 8, 'G5': 10, 'F#5': 14, 'F5': 17, 
       'E5': 25, 'D#5': 29, 'D5': 33, 'C#5': 36, 'C5': 40,
@@ -162,7 +177,7 @@ export class ViolinCompanion extends LitElement {
       'C#4': 91, 'C4': 95, 'B3': 100, 'A#3': 102, 'A3': 105, 
       'G#3': 107, 'G3': 110
     };
-    return positions[note] || 50;
+    return positions[note as NoteName] || 50;
   }
 
   render() {
@@ -229,7 +244,7 @@ export class ViolinCompanion extends LitElement {
                 ${Object.keys(this.noteFrequencies).map(note => html`
                   <button 
                     class="btn btn-sm ${this.targetNote === note ? 'btn-primary' : 'btn-ghost'}"
-                    @click=${() => this.setTargetNote(note)}>
+                    @click=${() => this.setTargetNote(note as NoteName)}>
                     ${note}
                   </button>
                 `)}
