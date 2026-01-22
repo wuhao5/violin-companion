@@ -1,4 +1,5 @@
 import { LitElement, html } from 'lit';
+import { property, state } from 'lit/decorators.js';
 import { PitchDetector } from 'pitchy';
 
 // Note frequencies for violin strings and common notes (chromatic scale)
@@ -35,23 +36,39 @@ const noteFrequencies = {
 // Type definitions derived from the noteFrequencies
 type NoteName = keyof typeof noteFrequencies;
 
+// Map notes to staff positions (0-100, where 0 is top)
+// Sharps are positioned slightly between their adjacent natural notes
+const notePositions: { [key in NoteName]: number } = {
+  // Octave 5
+  'A5': 5, 'G#5': 8, 'G5': 10, 'F#5': 14, 'F5': 17,
+  'E5': 25, 'D#5': 29, 'D5': 33, 'C#5': 36, 'C5': 40,
+  // Octave 4
+  'B4': 48, 'A#4': 52, 'A4': 56, 'G#4': 60, 'G4': 64,
+  'F#4': 68, 'F4': 72, 'E4': 80, 'D#4': 84, 'D4': 88,
+  // Octave 3-4
+  'C#4': 91, 'C4': 95, 'B3': 100, 'A#3': 102, 'A3': 105,
+  'G#3': 107, 'G3': 110
+};
+
 export class ViolinCompanion extends LitElement {
   // Public reactive properties
-  isListening: boolean = false;
-  currentNote: string = '--';
-  currentFrequency: number = 0;
-  clarity: number = 0;
-  targetNote: NoteName = 'A4';
-  inTune: boolean = false;
+  @state()
+  isListening = false;
 
-  static properties = {
-    isListening: { type: Boolean },
-    currentNote: { type: String },
-    currentFrequency: { type: Number },
-    clarity: { type: Number },
-    targetNote: { type: String },
-    inTune: { type: Boolean }
-  };
+  @state()
+  currentNote = '--';
+
+  @state()
+  currentFrequency = 0;
+
+  @state()
+  clarity = 0;
+
+  @property({ type: String })
+  targetNote: NoteName = 'A4';
+
+  @state()
+  inTune = false;
 
   // Disable shadow DOM to allow Tailwind classes to work
   // Note: This removes style encapsulation and may cause CSS conflicts with parent elements
@@ -60,58 +77,51 @@ export class ViolinCompanion extends LitElement {
   }
 
   // Private properties with explicit types
-  private audioContext: AudioContext | undefined = undefined;
-  private analyser: AnalyserNode | undefined = undefined;
-  private detector: PitchDetector<Float32Array> | undefined = undefined;
-  private animationId: number | undefined = undefined;
-
-  constructor() {
-    super();
-  }
-
-  // Note frequencies reference
-  private readonly noteFrequencies = noteFrequencies;
+  private audioContext?: AudioContext;
+  private analyser?: AnalyserNode;
+  private detector?: PitchDetector<Float32Array>;
+  private animationId?: number;
 
   async startListening(): Promise<void> {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
+
       this.audioContext = new AudioContext();
       this.analyser = this.audioContext.createAnalyser();
       this.analyser.fftSize = 2048;
-      
+
       const source = this.audioContext.createMediaStreamSource(stream);
       source.connect(this.analyser);
-      
+
       const bufferLength = this.analyser.fftSize;
       const buffer = new Float32Array(bufferLength);
-      
+
       this.detector = PitchDetector.forFloat32Array(bufferLength);
       this.detector.minVolumeDecibels = -30;
-      
+
       this.isListening = true;
-      
+
       const updatePitch = (): void => {
         if (!this.analyser || !this.detector || !this.audioContext) {
           return;
         }
 
         this.analyser.getFloatTimeDomainData(buffer);
-        
+
         const [frequency, clarity] = this.detector.findPitch(buffer, this.audioContext.sampleRate);
-        
+
         if (frequency && clarity > 0.9) {
           this.currentFrequency = frequency;
           this.clarity = clarity;
           this.currentNote = this.frequencyToNote(frequency);
           this.checkTuning(frequency);
         }
-        
+
         if (this.isListening) {
           this.animationId = requestAnimationFrame(updatePitch);
         }
       };
-      
+
       updatePitch();
     } catch (error) {
       console.error('Error accessing microphone:', error);
@@ -121,17 +131,17 @@ export class ViolinCompanion extends LitElement {
 
   stopListening(): void {
     this.isListening = false;
-    
+
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
       this.animationId = undefined;
     }
-    
+
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = undefined;
     }
-    
+
     this.currentNote = '--';
     this.currentFrequency = 0;
     this.clarity = 0;
@@ -149,7 +159,7 @@ export class ViolinCompanion extends LitElement {
   }
 
   private checkTuning(frequency: number): void {
-    const targetFreq = this.noteFrequencies[this.targetNote];
+    const targetFreq = noteFrequencies[this.targetNote];
     if (targetFreq) {
       const cents = 1200 * Math.log2(frequency / targetFreq);
       this.inTune = Math.abs(cents) < 10; // Within 10 cents is considered in tune
@@ -164,20 +174,7 @@ export class ViolinCompanion extends LitElement {
   }
 
   private getNotePosition(note: string): number {
-    // Map notes to staff positions (0-100, where 0 is top)
-    // Sharps are positioned slightly between their adjacent natural notes
-    const positions: Record<NoteName, number> = {
-      // Octave 5
-      'A5': 5, 'G#5': 8, 'G5': 10, 'F#5': 14, 'F5': 17, 
-      'E5': 25, 'D#5': 29, 'D5': 33, 'C#5': 36, 'C5': 40,
-      // Octave 4
-      'B4': 48, 'A#4': 52, 'A4': 56, 'G#4': 60, 'G4': 64, 
-      'F#4': 68, 'F4': 72, 'E4': 80, 'D#4': 84, 'D4': 88,
-      // Octave 3-4
-      'C#4': 91, 'C4': 95, 'B3': 100, 'A#3': 102, 'A3': 105, 
-      'G#3': 107, 'G3': 110
-    };
-    return positions[note as NoteName] || 50;
+    return notePositions[note as NoteName] || 50;
   }
 
   render() {
@@ -241,7 +238,7 @@ export class ViolinCompanion extends LitElement {
               </h2>
               
               <div class="flex flex-wrap justify-center gap-2 mb-8">
-                ${Object.keys(this.noteFrequencies).map(note => html`
+                ${Object.keys(noteFrequencies).map(note => html`
                   <button 
                     class="btn btn-sm ${this.targetNote === note ? 'btn-primary' : 'btn-ghost'}"
                     @click=${() => this.setTargetNote(note as NoteName)}>
