@@ -35,12 +35,18 @@ export class MusicSheetDisplay extends LitElement {
   @state()
   private sheetComposer = '';
 
+  @state()
+  private needsInitialLoad = true;
+
   @query('#osmdContainer')
   private container?: HTMLDivElement;
 
   private osmd?: OpenSheetMusicDisplay;
   private notes: NoteInfo[] = [];
   private dragCounter = 0;
+  
+  // Delay to allow OSMD layout engine to complete calculations before rendering
+  private readonly OSMD_LAYOUT_DELAY_MS = 100;
 
   // Disable shadow DOM for Tailwind
   createRenderRoot() {
@@ -53,35 +59,41 @@ export class MusicSheetDisplay extends LitElement {
   }
 
   async firstUpdated() {
-    // Wait for the container to be in the DOM and have dimensions
-    await this.updateComplete;
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Initial load will happen in updated()
+  }
+
+  async updated(changedProperties: Map<string, any>) {
+    super.updated(changedProperties);
     
-    if (this.container) {
-      console.log('Container dimensions:', {
-        width: this.container.offsetWidth,
-        height: this.container.offsetHeight
-      });
+    // Load score after first render is complete
+    if (this.needsInitialLoad && this.container && this.container.offsetWidth > 0) {
+      this.needsInitialLoad = false;
+      await this.loadScore(this.availableScores[this.selectedScore].path);
     }
-    
-    await this.loadScore(this.availableScores[this.selectedScore].path);
   }
 
   private async loadScore(path: string) {
-    if (!this.container) return;
-
+    // Set loading state BEFORE creating OSMD
     this.isLoading = true;
     this.errorMessage = '';
+    await this.updateComplete; // Wait for loading spinner to render
 
     try {
+      // Get fresh container reference after render - @query decorator may be stale
+      // because we just updated the component state
+      const container = document.getElementById('osmdContainer') as HTMLDivElement;
+      if (!container) {
+        throw new Error('Container not found after loading state update');
+      }
+
       // Clear previous instance
       if (this.osmd) {
         this.osmd = undefined;
       }
-      this.container.innerHTML = '';
+      container.innerHTML = '';
 
-      // Create new OSMD instance
-      this.osmd = new OpenSheetMusicDisplay(this.container, {
+      // Create new OSMD instance  
+      this.osmd = new OpenSheetMusicDisplay(container, {
         autoResize: true,
         backend: 'svg',
         drawTitle: false,
@@ -91,12 +103,16 @@ export class MusicSheetDisplay extends LitElement {
       });
 
       await this.osmd.load(path);
+      
+      // Wait for layout to complete
+      await new Promise(resolve => setTimeout(resolve, this.OSMD_LAYOUT_DELAY_MS));
+      
       await this.osmd.render();
 
       // Extract notes from the sheet
       this.extractNotes();
       
-      // Extract metadata
+      // Extract metadata and update state
       if (this.osmd.sheet) {
         this.sheetTitle = this.osmd.sheet.TitleString || 'Untitled';
         this.sheetComposer = this.osmd.sheet.Composer?.text || '';
@@ -326,15 +342,22 @@ export class MusicSheetDisplay extends LitElement {
   }
 
   private async loadScoreFromString(xmlString: string, filename: string) {
-    if (!this.container) return;
-
+    // Set loading state BEFORE creating OSMD
     this.isLoading = true;
     this.errorMessage = '';
+    await this.updateComplete; // Wait for loading spinner to render
 
     try {
-      this.container.innerHTML = '';
+      // Get fresh container reference after render - @query decorator may be stale
+      // because we just updated the component state
+      const container = document.getElementById('osmdContainer') as HTMLDivElement;
+      if (!container) {
+        throw new Error('Container not found after loading state update');
+      }
       
-      this.osmd = new OpenSheetMusicDisplay(this.container, {
+      container.innerHTML = '';
+      
+      this.osmd = new OpenSheetMusicDisplay(container, {
         autoResize: true,
         backend: 'svg',
         drawTitle: false,
@@ -344,6 +367,10 @@ export class MusicSheetDisplay extends LitElement {
       });
 
       await this.osmd.load(xmlString);
+      
+      // Wait for layout to complete
+      await new Promise(resolve => setTimeout(resolve, this.OSMD_LAYOUT_DELAY_MS));
+      
       await this.osmd.render();
 
       this.extractNotes();
@@ -420,29 +447,31 @@ export class MusicSheetDisplay extends LitElement {
           @drop=${this.handleDrop}>
           
           ${this.isLoading ? html`
-            <div class="flex items-center justify-center h-64">
+            <div class="absolute inset-0 flex items-center justify-center bg-base-200 z-10">
               <span class="loading loading-spinner loading-lg"></span>
             </div>
-          ` : html`
-            <div id="osmdContainer" style="width: 100%; min-height: 300px; background: white; border-radius: 8px; padding: 16px;"></div>
-            ${isDragging ? html`
-              <div class="absolute inset-0 flex items-center justify-center pointer-events-none bg-primary/10">
-                <div class="text-center">
-                  <span class="icon-[mdi--file-music] text-6xl text-primary mb-2"></span>
-                  <p class="text-lg font-bold text-primary">Drop MusicXML file here</p>
-                </div>
+          ` : ''}
+          
+          <div id="osmdContainer" style="width: 100%; min-height: 400px; background: white; border-radius: 8px; padding: 16px;"></div>
+          
+          ${isDragging ? html`
+            <div class="absolute inset-0 flex items-center justify-center pointer-events-none bg-primary/10 z-20">
+              <div class="text-center">
+                <span class="icon-[mdi--file-music] text-6xl text-primary mb-2"></span>
+                <p class="text-lg font-bold text-primary">Drop MusicXML file here</p>
               </div>
-            ` : ''}
-            ${!isDragging && this.notes.length === 0 && !this.isLoading ? html`
-              <div class="absolute inset-0 flex items-center justify-center text-center text-base-content/60">
-                <div>
-                  <span class="icon-[mdi--file-music-outline] text-5xl mb-2 block"></span>
-                  <p>Drag and drop a MusicXML file here</p>
-                  <p class="text-sm">or select a sample song above</p>
-                </div>
+            </div>
+          ` : ''}
+          
+          ${!isDragging && this.notes.length === 0 && !this.isLoading ? html`
+            <div class="absolute inset-0 flex items-center justify-center text-center text-base-content/60 z-20">
+              <div>
+                <span class="icon-[mdi--file-music-outline] text-5xl mb-2 block"></span>
+                <p>Drag and drop a MusicXML file here</p>
+                <p class="text-sm">or select a sample song above</p>
               </div>
-            ` : ''}
-          `}
+            </div>
+          ` : ''}
         </div>
 
         <!-- Controls -->
