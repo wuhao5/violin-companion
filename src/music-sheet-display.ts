@@ -44,6 +44,9 @@ export class MusicSheetDisplay extends LitElement {
   private osmd?: OpenSheetMusicDisplay;
   private notes: NoteInfo[] = [];
   private dragCounter = 0;
+  
+  // Delay to allow OSMD layout engine to complete calculations before rendering
+  private readonly OSMD_LAYOUT_DELAY_MS = 100;
 
   // Disable shadow DOM for Tailwind
   createRenderRoot() {
@@ -70,15 +73,14 @@ export class MusicSheetDisplay extends LitElement {
   }
 
   private async loadScore(path: string) {
-    if (!this.container) return;
-
     // Set loading state BEFORE creating OSMD
     this.isLoading = true;
     this.errorMessage = '';
     await this.updateComplete; // Wait for loading spinner to render
 
     try {
-      // Get fresh container reference after render
+      // Get fresh container reference after render - @query decorator may be stale
+      // because we just updated the component state
       const container = document.getElementById('osmdContainer') as HTMLDivElement;
       if (!container) {
         throw new Error('Container not found after loading state update');
@@ -103,7 +105,7 @@ export class MusicSheetDisplay extends LitElement {
       await this.osmd.load(path);
       
       // Wait for layout to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, this.OSMD_LAYOUT_DELAY_MS));
       
       await this.osmd.render();
 
@@ -340,15 +342,14 @@ export class MusicSheetDisplay extends LitElement {
   }
 
   private async loadScoreFromString(xmlString: string, filename: string) {
-    if (!this.container) return;
-
     // Set loading state BEFORE creating OSMD
     this.isLoading = true;
     this.errorMessage = '';
     await this.updateComplete; // Wait for loading spinner to render
 
     try {
-      // Get fresh container reference after render
+      // Get fresh container reference after render - @query decorator may be stale
+      // because we just updated the component state
       const container = document.getElementById('osmdContainer') as HTMLDivElement;
       if (!container) {
         throw new Error('Container not found after loading state update');
@@ -368,7 +369,7 @@ export class MusicSheetDisplay extends LitElement {
       await this.osmd.load(xmlString);
       
       // Wait for layout to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, this.OSMD_LAYOUT_DELAY_MS));
       
       await this.osmd.render();
 
