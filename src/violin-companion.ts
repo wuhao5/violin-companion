@@ -2,6 +2,7 @@ import { LitElement, html } from 'lit';
 import { property, state, query } from 'lit/decorators.js';
 import { PitchDetector } from 'pitchy';
 import './music-sheet-display';
+import { MusicSheetDisplay } from './music-sheet-display';
 
 // Note frequencies for violin strings and common notes (chromatic scale)
 const noteFrequencies = {
@@ -75,7 +76,7 @@ export class ViolinCompanion extends LitElement {
   sheetMode = false;
 
   @query('music-sheet-display')
-  private sheetDisplay?: any;
+  private sheetDisplay?: MusicSheetDisplay;
 
   // Disable shadow DOM to allow Tailwind classes to work
   // Note: This removes style encapsulation and may cause CSS conflicts with parent elements

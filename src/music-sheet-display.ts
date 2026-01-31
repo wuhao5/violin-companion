@@ -1,6 +1,17 @@
 import { LitElement, html, css } from 'lit';
 import { state } from 'lit/decorators.js';
-import { MusicSheet, Note, parseABCNotation, sampleSheets } from './music-sheet';
+import { MusicSheet, Note, Measure, parseABCNotation, sampleSheets } from './music-sheet';
+
+// Helper function to extract title from ABC notation
+function getTitleFromABC(abc: string): string {
+  const lines = abc.split('\n');
+  for (const line of lines) {
+    if (line.trim().startsWith('T:')) {
+      return line.substring(2).trim();
+    }
+  }
+  return 'Untitled';
+}
 
 export class MusicSheetDisplay extends LitElement {
   @state()
@@ -139,7 +150,7 @@ export class MusicSheetDisplay extends LitElement {
     return false;
   }
 
-  private getDisplayMeasures(): { measure: any, opacity: string }[] {
+  private getDisplayMeasures(): { measure: Measure, opacity: string }[] {
     if (!this.sheet) return [];
     
     const currentMeasure = this.sheet.allNotes[this.currentNoteIndex]?.measure;
@@ -197,7 +208,7 @@ export class MusicSheetDisplay extends LitElement {
             @change=${(e: Event) => this.loadSheet((e.target as HTMLSelectElement).value)}>
             ${Object.keys(sampleSheets).map(key => html`
               <option value=${key}>
-                ${sampleSheets[key].split('\n')[0].substring(2)}
+                ${getTitleFromABC(sampleSheets[key])}
               </option>
             `)}
           </select>

@@ -100,8 +100,8 @@ function parseNote(token: string, measureNum: number, noteIndex: number): Note |
     'c': 'C5', 'd': 'D5', 'e': 'E5', 'f': 'F5', 'g': 'G5', 'a': 'A5', 'b': 'B5',
     '^C': 'C#4', '^D': 'D#4', '^F': 'F#4', '^G': 'G#4', '^A': 'A#4',
     '^c': 'C#5', '^d': 'D#5', '^f': 'F#5', '^g': 'G#5', '^a': 'A#5',
-    '_D': 'D4', '_E': 'E4', '_G': 'G4', '_A': 'A4', '_B': 'B4',
-    '_d': 'D5', '_e': 'E5', '_g': 'G5', '_a': 'A5', '_b': 'B5',
+    '_D': 'C#4', '_E': 'D#4', '_G': 'F#4', '_A': 'G#4', '_B': 'A#4',
+    '_d': 'C#5', '_e': 'D#5', '_g': 'F#5', '_a': 'G#5', '_b': 'A#5',
   };
 
   // Extract duration if present (e.g., "C2" = half note)
