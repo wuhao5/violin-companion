@@ -1,6 +1,8 @@
 import { LitElement, html } from 'lit';
-import { property, state } from 'lit/decorators.js';
+import { property, state, query } from 'lit/decorators.js';
 import { PitchDetector } from 'pitchy';
+import './music-sheet-display';
+import { MusicSheetDisplay } from './music-sheet-display';
 
 // Note frequencies for violin strings and common notes (chromatic scale)
 const noteFrequencies = {
@@ -70,6 +72,12 @@ export class ViolinCompanion extends LitElement {
   @state()
   inTune = false;
 
+  @state()
+  sheetMode = false;
+
+  @query('music-sheet-display')
+  private sheetDisplay?: MusicSheetDisplay;
+
   // Disable shadow DOM to allow Tailwind classes to work
   // Note: This removes style encapsulation and may cause CSS conflicts with parent elements
   createRenderRoot() {
@@ -81,6 +89,8 @@ export class ViolinCompanion extends LitElement {
   private analyser?: AnalyserNode;
   private detector?: PitchDetector<Float32Array>;
   private animationId?: number;
+  private lastMatchedNote: string = '';
+  private lastMatchTime: number = 0;
 
   async startListening(): Promise<void> {
     try {
@@ -115,6 +125,22 @@ export class ViolinCompanion extends LitElement {
           this.clarity = clarity;
           this.currentNote = this.frequencyToNote(frequency);
           this.checkTuning(frequency);
+          
+          // Check if in sheet mode and if note matches
+          if (this.sheetMode && this.sheetDisplay) {
+            const now = Date.now();
+            // Require note to be held for 500ms to advance
+            if (this.currentNote === this.lastMatchedNote) {
+              if (now - this.lastMatchTime > 500) {
+                this.sheetDisplay.checkNote(this.currentNote);
+                this.lastMatchedNote = '';
+                this.lastMatchTime = 0;
+              }
+            } else {
+              this.lastMatchedNote = this.currentNote;
+              this.lastMatchTime = now;
+            }
+          }
         }
 
         if (this.isListening) {
@@ -187,6 +213,24 @@ export class ViolinCompanion extends LitElement {
               Violin Companion
             </h1>
             
+            <!-- Mode Toggle -->
+            <div class="flex justify-center mb-6">
+              <div class="btn-group">
+                <button 
+                  class="btn ${!this.sheetMode ? 'btn-active btn-primary' : 'btn-ghost'}"
+                  @click=${() => this.sheetMode = false}>
+                  <span class="icon-[mdi--tune]"></span>
+                  Tuner Mode
+                </button>
+                <button 
+                  class="btn ${this.sheetMode ? 'btn-active btn-primary' : 'btn-ghost'}"
+                  @click=${() => this.sheetMode = true}>
+                  <span class="icon-[mdi--music-note]"></span>
+                  Practice Mode
+                </button>
+              </div>
+            </div>
+
             <div class="flex justify-center gap-4 my-6">
               <button 
                 class="btn btn-primary btn-lg"
@@ -232,46 +276,54 @@ export class ViolinCompanion extends LitElement {
               `}
             </div>
 
-            <div class="mt-8 bg-base-200 rounded-2xl p-6">
-              <h2 class="text-2xl font-bold text-base-content/80 mb-4">
-                Target Note: ${this.targetNote}
-              </h2>
-              
-              <div class="flex flex-wrap justify-center gap-2 mb-8">
-                ${Object.keys(noteFrequencies).map(note => html`
-                  <button 
-                    class="btn btn-sm ${this.targetNote === note ? 'btn-primary' : 'btn-ghost'}"
-                    @click=${() => this.setTargetNote(note as NoteName)}>
-                    ${note}
-                  </button>
-                `)}
+            ${this.sheetMode ? html`
+              <!-- Music Sheet Display -->
+              <div class="mt-8">
+                <music-sheet-display></music-sheet-display>
+              </div>
+            ` : html`
+              <!-- Tuner Mode -->
+              <div class="mt-8 bg-base-200 rounded-2xl p-6">
+                <h2 class="text-2xl font-bold text-base-content/80 mb-4">
+                  Target Note: ${this.targetNote}
+                </h2>
+                
+                <div class="flex flex-wrap justify-center gap-2 mb-8">
+                  ${Object.keys(noteFrequencies).map(note => html`
+                    <button 
+                      class="btn btn-sm ${this.targetNote === note ? 'btn-primary' : 'btn-ghost'}"
+                      @click=${() => this.setTargetNote(note as NoteName)}>
+                      ${note}
+                    </button>
+                  `)}
+                </div>
+
+                <div class="relative h-40 my-8">
+                  ${[0, 1, 2, 3, 4].map(i => html`
+                    <div class="absolute w-full h-0.5 bg-slate-700 left-0" style="top: ${20 + i * 26}px"></div>
+                  `)}
+                  ${this.currentNote !== '--' ? html`
+                    <div 
+                      class="absolute w-10 h-10 ${this.inTune ? 'bg-success shadow-success/50' : 'bg-primary'} rounded-full left-1/2 -translate-x-1/2 transition-all duration-300 shadow-lg"
+                      style="top: ${this.getNotePosition(this.currentNote)}px">
+                    </div>
+                  ` : ''}
+                </div>
               </div>
 
-              <div class="relative h-40 my-8">
-                ${[0, 1, 2, 3, 4].map(i => html`
-                  <div class="absolute w-full h-0.5 bg-slate-700 left-0" style="top: ${20 + i * 26}px"></div>
-                `)}
-                ${this.currentNote !== '--' ? html`
-                  <div 
-                    class="absolute w-10 h-10 ${this.inTune ? 'bg-success shadow-success/50' : 'bg-primary'} rounded-full left-1/2 -translate-x-1/2 transition-all duration-300 shadow-lg"
-                    style="top: ${this.getNotePosition(this.currentNote)}px">
-                  </div>
-                ` : ''}
+              <div class="alert alert-info mt-6">
+                <span class="icon-[mdi--information-outline] text-2xl"></span>
+                <div>
+                  <h3 class="font-bold">How to use:</h3>
+                  <ol class="list-decimal list-inside mt-2">
+                    <li>Click "Start Listening" to allow microphone access</li>
+                    <li>Select a target note you want to practice</li>
+                    <li>Play that note on your violin</li>
+                    <li>The app will show you the detected pitch and if you're in tune (green = in tune)</li>
+                  </ol>
+                </div>
               </div>
-            </div>
-
-            <div class="alert alert-info mt-6">
-              <span class="icon-[mdi--information-outline] text-2xl"></span>
-              <div>
-                <h3 class="font-bold">How to use:</h3>
-                <ol class="list-decimal list-inside mt-2">
-                  <li>Click "Start Listening" to allow microphone access</li>
-                  <li>Select a target note you want to practice</li>
-                  <li>Play that note on your violin</li>
-                  <li>The app will show you the detected pitch and if you're in tune (green = in tune)</li>
-                </ol>
-              </div>
-            </div>
+            `}
           </div>
         </div>
       </div>
