@@ -1,22 +1,13 @@
-import { LitElement, html, css } from 'lit';
-import { state } from 'lit/decorators.js';
-import { MusicSheet, Note, Measure, parseABCNotation, sampleSheets } from './music-sheet';
+import { LitElement, html } from 'lit';
+import { state, query } from 'lit/decorators.js';
+import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 
-// Helper function to extract title from ABC notation
-function getTitleFromABC(abc: string): string {
-  const lines = abc.split('\n');
-  for (const line of lines) {
-    if (line.trim().startsWith('T:')) {
-      return line.substring(2).trim();
-    }
-  }
-  return 'Untitled';
+interface NoteInfo {
+  pitch: string; // e.g., "C4", "D5"
+  index: number;
 }
 
 export class MusicSheetDisplay extends LitElement {
-  @state()
-  private sheet: MusicSheet | null = null;
-
   @state()
   private currentNoteIndex = 0;
 
@@ -24,7 +15,32 @@ export class MusicSheetDisplay extends LitElement {
   private bookmark: number = 0;
 
   @state()
-  private selectedSheet: string = 'twinkle-twinkle';
+  private availableScores: { name: string; path: string }[] = [
+    { name: 'Twinkle Twinkle Little Star', path: '/scores/twinkle-twinkle.xml' },
+    { name: 'Mary Had a Little Lamb', path: '/scores/mary-lamb.xml' }
+  ];
+
+  @state()
+  private selectedScore = 0;
+
+  @state()
+  private isLoading = false;
+
+  @state()
+  private errorMessage = '';
+
+  @state()
+  private sheetTitle = '';
+
+  @state()
+  private sheetComposer = '';
+
+  @query('#osmdContainer')
+  private container?: HTMLDivElement;
+
+  private osmd?: OpenSheetMusicDisplay;
+  private notes: NoteInfo[] = [];
+  private dragCounter = 0;
 
   // Disable shadow DOM for Tailwind
   createRenderRoot() {
@@ -34,21 +50,169 @@ export class MusicSheetDisplay extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.loadBookmark();
-    this.loadSheet(this.selectedSheet);
   }
 
-  private loadSheet(sheetName: string) {
-    const abcNotation = sampleSheets[sheetName];
-    if (abcNotation) {
-      this.sheet = parseABCNotation(abcNotation);
-      this.selectedSheet = sheetName;
-      // If bookmark is beyond the new sheet, reset
-      if (this.bookmark >= (this.sheet?.allNotes.length || 0)) {
+  async firstUpdated() {
+    // Wait for the container to be in the DOM and have dimensions
+    await this.updateComplete;
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    if (this.container) {
+      console.log('Container dimensions:', {
+        width: this.container.offsetWidth,
+        height: this.container.offsetHeight
+      });
+    }
+    
+    await this.loadScore(this.availableScores[this.selectedScore].path);
+  }
+
+  private async loadScore(path: string) {
+    if (!this.container) return;
+
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    try {
+      // Clear previous instance
+      if (this.osmd) {
+        this.osmd = undefined;
+      }
+      this.container.innerHTML = '';
+
+      // Create new OSMD instance
+      this.osmd = new OpenSheetMusicDisplay(this.container, {
+        autoResize: true,
+        backend: 'svg',
+        drawTitle: false,
+        drawComposer: false,
+        drawCredits: false,
+        drawPartNames: false
+      });
+
+      await this.osmd.load(path);
+      await this.osmd.render();
+
+      // Extract notes from the sheet
+      this.extractNotes();
+      
+      // Extract metadata
+      if (this.osmd.sheet) {
+        this.sheetTitle = this.osmd.sheet.TitleString || 'Untitled';
+        this.sheetComposer = this.osmd.sheet.Composer?.text || '';
+      }
+
+      // Restore bookmark if valid
+      if (this.bookmark >= this.notes.length) {
         this.bookmark = 0;
         this.saveBookmark();
       }
       this.currentNoteIndex = this.bookmark;
+
+      // Highlight current note
+      this.highlightCurrentNote();
+
+    } catch (error) {
+      console.error('Error loading score:', error);
+      this.errorMessage = 'Failed to load music sheet. Please try another file.';
+    } finally {
+      this.isLoading = false;
     }
+  }
+
+  private extractNotes() {
+    this.notes = [];
+    if (!this.osmd?.sheet || !this.osmd?.sheet.SourceMeasures) return;
+
+    let noteIndex = 0;
+    
+    try {
+      // Iterate through measures and extract notes
+      for (const measure of this.osmd.sheet.SourceMeasures) {
+        if (!measure.VerticalSourceStaffEntryContainers) continue;
+        
+        for (const staffEntry of measure.VerticalSourceStaffEntryContainers) {
+          if (!staffEntry.StaffEntries) continue;
+          
+          for (const entry of staffEntry.StaffEntries) {
+            if (!entry || !entry.VoiceEntries) continue;
+            
+            for (const voiceEntry of entry.VoiceEntries) {
+              if (!voiceEntry || !voiceEntry.Notes) continue;
+              
+              for (const note of voiceEntry.Notes) {
+                if (note && !note.isRest() && note.Pitch) {
+                  try {
+                    const pitch = this.getNoteString(note);
+                    if (pitch && pitch.length > 1) { // Valid pitch like "C4"
+                      this.notes.push({ pitch, index: noteIndex++ });
+                    }
+                  } catch (e) {
+                    console.warn('Error extracting note:', e);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      console.log('Extracted notes:', this.notes);
+    } catch (error) {
+      console.error('Error in extractNotes:', error);
+    }
+  }
+
+  private getNoteString(note: any): string {
+    try {
+      // Get the actual pitch information
+      const pitch = note.Pitch;
+      if (!pitch) return '';
+      
+      const step = pitch.FundamentalNote;
+      const octave = pitch.Octave;
+      const alter = pitch.Accidental || 0;
+      
+      // The step should be 0-6 for C-B
+      // OSMD FundamentalNote enum: 0=C, 1=D, 2=E, 3=F, 4=G, 5=A, 6=B
+      const noteNames = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+      let noteName = '';
+      
+      if (step >= 0 && step < 7) {
+        noteName = noteNames[step];
+      } else {
+        // Invalid note, skip it
+        return '';
+      }
+      
+      // OSMD uses octave numbering where middle C (C4) is octave 1
+      // We need to add 3 to match standard notation
+      const standardOctave = octave + 3;
+      
+      if (alter === 1) noteName += '#';
+      // Flats converted to enharmonic sharps for consistency
+      else if (alter === -1) {
+        const flatToSharp: { [key: string]: string } = {
+          'D': 'C#', 'E': 'D#', 'G': 'F#', 'A': 'G#', 'B': 'A#'
+        };
+        noteName = flatToSharp[noteName] || noteName;
+      }
+      
+      return noteName + standardOctave;
+    } catch (error) {
+      console.error('Error getting note string:', error);
+      return '';
+    }
+  }
+
+  private highlightCurrentNote() {
+    if (!this.osmd) return;
+
+    // Remove previous highlights
+    const previousHighlights = this.container?.querySelectorAll('.current-note-highlight');
+    previousHighlights?.forEach(el => el.remove());
+
+    // TODO: Use OSMD cursor API to highlight the current note on the staff
+    // For now, we rely on the visual indicator showing the current note name
   }
 
   private loadBookmark() {
@@ -65,7 +229,6 @@ export class MusicSheetDisplay extends LitElement {
   setBookmark() {
     this.bookmark = this.currentNoteIndex;
     this.saveBookmark();
-    // Show visual feedback
     this.dispatchEvent(new CustomEvent('bookmark-set', {
       detail: { index: this.bookmark },
       bubbles: true,
@@ -75,144 +238,165 @@ export class MusicSheetDisplay extends LitElement {
 
   goToBookmark() {
     this.currentNoteIndex = this.bookmark;
+    this.highlightCurrentNote();
   }
 
   reset() {
     this.currentNoteIndex = 0;
+    this.highlightCurrentNote();
   }
 
   previousNote() {
     if (this.currentNoteIndex > 0) {
       this.currentNoteIndex--;
+      this.highlightCurrentNote();
     }
   }
 
   nextNote() {
-    if (this.sheet && this.currentNoteIndex < this.sheet.allNotes.length - 1) {
+    if (this.currentNoteIndex < this.notes.length - 1) {
       this.currentNoteIndex++;
+      this.highlightCurrentNote();
     }
   }
 
-  previousMeasure() {
-    if (!this.sheet) return;
-    const currentMeasure = this.sheet.allNotes[this.currentNoteIndex]?.measure;
-    if (currentMeasure === undefined) return;
-    
-    // Find first note of previous measure
-    for (let i = this.currentNoteIndex - 1; i >= 0; i--) {
-      if (this.sheet.allNotes[i].measure < currentMeasure) {
-        // Found a note in previous measure, go to first note of that measure
-        const targetMeasure = this.sheet.allNotes[i].measure;
-        for (let j = i; j >= 0; j--) {
-          if (this.sheet.allNotes[j].measure === targetMeasure) {
-            this.currentNoteIndex = j;
-          } else {
-            break;
-          }
-        }
-        return;
-      }
-    }
-    // If we're in the first measure, go to beginning
-    this.currentNoteIndex = 0;
+  getCurrentNote(): NoteInfo | null {
+    return this.notes[this.currentNoteIndex] || null;
   }
 
-  nextMeasure() {
-    if (!this.sheet) return;
-    const currentMeasure = this.sheet.allNotes[this.currentNoteIndex]?.measure;
-    if (currentMeasure === undefined) return;
-    
-    // Find first note of next measure
-    for (let i = this.currentNoteIndex + 1; i < this.sheet.allNotes.length; i++) {
-      if (this.sheet.allNotes[i].measure > currentMeasure) {
-        this.currentNoteIndex = i;
-        return;
-      }
-    }
-    // Already at last measure
-  }
-
-  getCurrentNote(): Note | null {
-    if (!this.sheet) return null;
-    return this.sheet.allNotes[this.currentNoteIndex] || null;
-  }
-
-  // Check if a detected note matches the current note
   checkNote(detectedNote: string): boolean {
     const currentNote = this.getCurrentNote();
     if (!currentNote) return false;
     
     if (detectedNote === currentNote.pitch) {
-      // Auto-advance to next note
       this.nextNote();
       return true;
     }
     return false;
   }
 
-  private getDisplayMeasures(): { measure: Measure, opacity: string }[] {
-    if (!this.sheet) return [];
-    
-    const currentMeasure = this.sheet.allNotes[this.currentNoteIndex]?.measure;
-    if (currentMeasure === undefined) return [];
+  private async handleScoreChange(e: Event) {
+    const select = e.target as HTMLSelectElement;
+    this.selectedScore = parseInt(select.value);
+    await this.loadScore(this.availableScores[this.selectedScore].path);
+  }
 
-    const result = [];
-    
-    // Previous measure (faded)
-    if (currentMeasure > 0) {
-      result.push({
-        measure: this.sheet.measures[currentMeasure - 1],
-        opacity: 'opacity-30'
-      });
+  // Drag and drop handlers
+  private handleDragEnter(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.dragCounter++;
+    this.requestUpdate();
+  }
+
+  private handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  private handleDragLeave(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.dragCounter--;
+    this.requestUpdate();
+  }
+
+  private async handleDrop(e: DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.dragCounter = 0;
+    this.requestUpdate();
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    if (!file.name.endsWith('.xml') && !file.name.endsWith('.musicxml') && !file.name.endsWith('.mxl')) {
+      this.errorMessage = 'Please drop a MusicXML file (.xml, .musicxml, or .mxl)';
+      return;
     }
-    
-    // Current measure (full opacity)
-    result.push({
-      measure: this.sheet.measures[currentMeasure],
-      opacity: 'opacity-100'
-    });
-    
-    // Next measure (faded)
-    if (currentMeasure < this.sheet.measures.length - 1) {
-      result.push({
-        measure: this.sheet.measures[currentMeasure + 1],
-        opacity: 'opacity-30'
-      });
+
+    try {
+      const text = await file.text();
+      await this.loadScoreFromString(text, file.name);
+    } catch (error) {
+      console.error('Error loading dropped file:', error);
+      this.errorMessage = 'Failed to load the dropped file.';
     }
-    
-    return result;
+  }
+
+  private async loadScoreFromString(xmlString: string, filename: string) {
+    if (!this.container) return;
+
+    this.isLoading = true;
+    this.errorMessage = '';
+
+    try {
+      this.container.innerHTML = '';
+      
+      this.osmd = new OpenSheetMusicDisplay(this.container, {
+        autoResize: true,
+        backend: 'svg',
+        drawTitle: false,
+        drawComposer: false,
+        drawCredits: false,
+        drawPartNames: false
+      });
+
+      await this.osmd.load(xmlString);
+      await this.osmd.render();
+
+      this.extractNotes();
+      
+      if (this.osmd.sheet) {
+        this.sheetTitle = this.osmd.sheet.TitleString || filename;
+        this.sheetComposer = this.osmd.sheet.Composer?.text || '';
+      }
+
+      this.currentNoteIndex = 0;
+      this.bookmark = 0;
+      this.saveBookmark();
+      this.highlightCurrentNote();
+
+    } catch (error) {
+      console.error('Error loading score from string:', error);
+      this.errorMessage = 'Failed to parse the MusicXML file.';
+    } finally {
+      this.isLoading = false;
+    }
   }
 
   render() {
-    if (!this.sheet) {
-      return html`<div class="text-center p-4">Loading sheet music...</div>`;
-    }
-
     const currentNote = this.getCurrentNote();
-    const displayMeasures = this.getDisplayMeasures();
+    const isDragging = this.dragCounter > 0;
 
     return html`
       <div class="bg-base-100 rounded-2xl p-6 mb-6">
         <div class="flex justify-between items-center mb-4">
           <div>
-            <h2 class="text-2xl font-bold">${this.sheet.title}</h2>
-            ${this.sheet.composer ? html`
-              <p class="text-sm text-base-content/70">by ${this.sheet.composer}</p>
+            <h2 class="text-2xl font-bold">${this.sheetTitle || 'Music Sheet'}</h2>
+            ${this.sheetComposer ? html`
+              <p class="text-sm text-base-content/70">by ${this.sheetComposer}</p>
             ` : ''}
           </div>
           
           <!-- Sheet Selection -->
           <select 
             class="select select-bordered select-sm"
-            .value=${this.selectedSheet}
-            @change=${(e: Event) => this.loadSheet((e.target as HTMLSelectElement).value)}>
-            ${Object.keys(sampleSheets).map(key => html`
-              <option value=${key}>
-                ${getTitleFromABC(sampleSheets[key])}
-              </option>
+            .value=${this.selectedScore.toString()}
+            @change=${this.handleScoreChange}>
+            ${this.availableScores.map((score, index) => html`
+              <option value=${index}>${score.name}</option>
             `)}
           </select>
         </div>
+
+        ${this.errorMessage ? html`
+          <div class="alert alert-error mb-4">
+            <span class="icon-[mdi--alert-circle]"></span>
+            ${this.errorMessage}
+          </div>
+        ` : ''}
 
         <!-- Current Note Display -->
         <div class="bg-primary/10 rounded-lg p-4 mb-4 text-center">
@@ -221,54 +405,48 @@ export class MusicSheetDisplay extends LitElement {
             ${currentNote ? currentNote.pitch : '--'}
           </div>
           <div class="text-sm text-base-content/60 mt-1">
-            Note ${this.currentNoteIndex + 1} of ${this.sheet.allNotes.length}
-            (Measure ${(currentNote?.measure || 0) + 1})
+            Note ${this.currentNoteIndex + 1} of ${this.notes.length}
           </div>
         </div>
 
-        <!-- Staff Display -->
-        <div class="bg-base-200 rounded-lg p-8 mb-4 overflow-x-auto">
-          <div class="min-w-[600px]">
-            <!-- Time signature and key -->
-            <div class="text-sm text-base-content/70 mb-2">
-              ${this.sheet.timeSignature} | Key: ${this.sheet.key}
+        <!-- Staff Display Container with Drag & Drop -->
+        <div 
+          class="bg-base-200 rounded-lg p-4 mb-4 min-h-[400px] relative border-2 transition-colors ${
+            isDragging ? 'border-primary border-dashed bg-primary/5' : 'border-base-300'
+          }"
+          @dragenter=${this.handleDragEnter}
+          @dragover=${this.handleDragOver}
+          @dragleave=${this.handleDragLeave}
+          @drop=${this.handleDrop}>
+          
+          ${this.isLoading ? html`
+            <div class="flex items-center justify-center h-64">
+              <span class="loading loading-spinner loading-lg"></span>
             </div>
-            
-            <!-- Measures -->
-            <div class="flex gap-4 items-center justify-center">
-              ${displayMeasures.map(({ measure, opacity }) => html`
-                <div class="relative ${opacity} transition-opacity duration-300">
-                  <div class="text-xs text-base-content/50 mb-1">
-                    Measure ${measure.number + 1}
-                  </div>
-                  <div class="flex gap-2 items-center min-w-[120px] bg-base-100 p-3 rounded border-2 
-                    ${measure.number === currentNote?.measure ? 'border-primary' : 'border-base-300'}">
-                    ${measure.notes.map((note: Note) => html`
-                      <div class="flex flex-col items-center">
-                        <div class="text-2xl font-bold ${
-                          note.index === this.currentNoteIndex 
-                            ? 'text-primary scale-125' 
-                            : 'text-base-content'
-                        } transition-all">
-                          ${note.pitch}
-                        </div>
-                        ${note.index === this.currentNoteIndex ? html`
-                          <div class="text-primary text-xs mt-1">
-                            <span class="icon-[mdi--arrow-up] text-xl"></span>
-                          </div>
-                        ` : ''}
-                      </div>
-                    `)}
-                  </div>
+          ` : html`
+            <div id="osmdContainer" style="width: 100%; min-height: 300px; background: white; border-radius: 8px; padding: 16px;"></div>
+            ${isDragging ? html`
+              <div class="absolute inset-0 flex items-center justify-center pointer-events-none bg-primary/10">
+                <div class="text-center">
+                  <span class="icon-[mdi--file-music] text-6xl text-primary mb-2"></span>
+                  <p class="text-lg font-bold text-primary">Drop MusicXML file here</p>
                 </div>
-              `)}
-            </div>
-          </div>
+              </div>
+            ` : ''}
+            ${!isDragging && this.notes.length === 0 && !this.isLoading ? html`
+              <div class="absolute inset-0 flex items-center justify-center text-center text-base-content/60">
+                <div>
+                  <span class="icon-[mdi--file-music-outline] text-5xl mb-2 block"></span>
+                  <p>Drag and drop a MusicXML file here</p>
+                  <p class="text-sm">or select a sample song above</p>
+                </div>
+              </div>
+            ` : ''}
+          `}
         </div>
 
         <!-- Controls -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <!-- Navigation by Note -->
           <button 
             class="btn btn-sm btn-outline"
             @click=${this.previousNote}
@@ -279,42 +457,27 @@ export class MusicSheetDisplay extends LitElement {
           <button 
             class="btn btn-sm btn-outline"
             @click=${this.nextNote}
-            ?disabled=${this.currentNoteIndex >= this.sheet.allNotes.length - 1}>
+            ?disabled=${this.currentNoteIndex >= this.notes.length - 1}>
             Next Note
             <span class="icon-[mdi--chevron-right]"></span>
           </button>
 
-          <!-- Navigation by Measure -->
-          <button 
-            class="btn btn-sm btn-outline"
-            @click=${this.previousMeasure}
-            ?disabled=${this.currentNoteIndex === 0}>
-            <span class="icon-[mdi--chevron-double-left]"></span>
-            Prev Measure
-          </button>
-          <button 
-            class="btn btn-sm btn-outline"
-            @click=${this.nextMeasure}
-            ?disabled=${currentNote?.measure === this.sheet.measures.length - 1}>
-            Next Measure
-            <span class="icon-[mdi--chevron-double-right]"></span>
-          </button>
-        </div>
-
-        <!-- Additional Controls -->
-        <div class="flex gap-2 mt-4 flex-wrap">
           <button 
             class="btn btn-sm btn-primary"
             @click=${this.reset}>
             <span class="icon-[mdi--restore]"></span>
             Reset
           </button>
+          
           <button 
             class="btn btn-sm btn-secondary"
             @click=${this.setBookmark}>
             <span class="icon-[mdi--bookmark]"></span>
-            Set Bookmark
+            Bookmark
           </button>
+        </div>
+
+        <div class="flex gap-2 mt-2">
           <button 
             class="btn btn-sm btn-secondary btn-outline"
             @click=${this.goToBookmark}
@@ -322,6 +485,15 @@ export class MusicSheetDisplay extends LitElement {
             <span class="icon-[mdi--bookmark-outline]"></span>
             Go to Bookmark (${this.bookmark + 1})
           </button>
+        </div>
+
+        <div class="alert alert-info mt-4">
+          <span class="icon-[mdi--information-outline]"></span>
+          <div class="text-sm">
+            <p><strong>Staff Notation:</strong> Music displayed on a traditional staff with proper note symbols</p>
+            <p><strong>Drag & Drop:</strong> Drop MusicXML files (.xml, .musicxml, .mxl) onto the staff area</p>
+            <p><strong>Auto-advance:</strong> Play the correct note to automatically move to the next one</p>
+          </div>
         </div>
       </div>
     `;
